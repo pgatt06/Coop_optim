@@ -22,10 +22,6 @@ def _record_opt_gap(history, alphas, alpha_star):
     history['consensus_gap'].append(float(np.max(np.linalg.norm(alphas - mean_alpha, axis=1))))
 
 
-def _prepare_local_data(agents):
-    return [(agent['M'], agent['y'], agent['Q'], agent['b']) for agent in agents]
-
-
 def run_dgd(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
     """
     DGD :
@@ -35,7 +31,6 @@ def run_dgd(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=F
     n_agents = len(agents)
     m = alpha_star.size
     alphas = _init_alphas(n_agents, m, x0=x0, seed=seed, random_init=random_init)
-    local_data = _prepare_local_data(agents)
 
     history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
     for _ in range(n_iters):
@@ -207,6 +202,193 @@ def get_corrupted_context(W_base, mode='normal', p_loss=0.2, p_active=0.4, seed=
             active_mask[rng.integers(0, n_agents)] = True
 
     return W_t, active_mask
+
+
+def make_directed_row_stochastic(W_base, seed=0):
+    """
+    Construit une matrice de mélange orientée (ligne-stochastique) à partir d'une matrice
+    symétrique/undirected, en supprimant aléatoirement une direction sur chaque lien.
+    """
+    rng = np.random.default_rng(seed)
+    W = np.asarray(W_base, dtype=float).copy()
+    n_agents = W.shape[0]
+
+    for i in range(n_agents):
+        for j in range(i + 1, n_agents):
+            if W[i, j] > 0 or W[j, i] > 0:
+                if rng.random() < 0.5:
+                    W[i, j] = 0.0
+                else:
+                    W[j, i] = 0.0
+
+    for i in range(n_agents):
+        row_sum = np.sum(W[i, :])
+        if row_sum <= 0:
+            W[i, :] = 0.0
+            W[i, i] = 1.0
+        else:
+            W[i, :] /= row_sum
+    return W
+
+
+def _lossy_row_stochastic_weights(W_base, p_loss, rng):
+    """
+    Applique des pertes de paquets sur les arcs de communication puis renormalise
+    chaque ligne pour conserver une matrice ligne-stochastique.
+    """
+    W = np.asarray(W_base, dtype=float).copy()
+    n_agents = W.shape[0]
+
+    for i in range(n_agents):
+        for j in range(n_agents):
+            if i != j and W[i, j] > 0 and rng.random() < p_loss:
+                W[i, j] = 0.0
+
+    for i in range(n_agents):
+        row_sum = np.sum(W[i, :])
+        if row_sum <= 0:
+            W[i, :] = 0.0
+            W[i, i] = 1.0
+        else:
+            W[i, :] /= row_sum
+    return W
+
+
+def run_dgd_packet_loss(
+    agents,
+    W_base,
+    alpha_star,
+    step,
+    n_iters,
+    p_loss=0.3,
+    x0=None,
+    seed=0,
+    random_init=False,
+):
+    """
+    DGD avec pertes de paquets : à chaque itération, on perturbe la matrice de mélange.
+    """
+    rng = np.random.default_rng(seed)
+    W_base = np.asarray(W_base, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, seed=seed, random_init=random_init)
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        W_t = _lossy_row_stochastic_weights(W_base, p_loss=p_loss, rng=rng)
+        new_alphas = np.zeros_like(alphas)
+        for i, agent in enumerate(agents):
+            grad_i = local_gradient(alphas[i], agent)
+            new_alphas[i] = W_t[i, :] @ alphas - step * grad_i
+        alphas = new_alphas
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    return history
+
+
+def run_async_dgd(
+    agents,
+    W,
+    alpha_star,
+    step,
+    n_iters,
+    p_active=0.35,
+    x0=None,
+    seed=0,
+    random_init=False,
+):
+    """
+    DGD asynchrone : à chaque itération, seul un sous-ensemble d'agents applique
+    la mise à jour gradient.
+    """
+    rng = np.random.default_rng(seed)
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, seed=seed, random_init=random_init)
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        G = np.vstack([local_gradient(alphas[i], agents[i]) for i in range(n_agents)])
+        mixed = W @ alphas
+        active = rng.random(n_agents) < p_active
+        if not np.any(active):
+            active[rng.integers(0, n_agents)] = True
+        new_alphas = mixed.copy()
+        new_alphas[active] -= step * G[active]
+        alphas = new_alphas
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    return history
+
+
+def build_column_stochastic_pushsum(W_row):
+    """
+    Construit une matrice colonne-stochastique P à partir d'une matrice ligne-stochastique W
+    (interprétation push-sum).
+    """
+    W_row = np.asarray(W_row, dtype=float)
+    n_agents = W_row.shape[0]
+    out_neighbors = [[] for _ in range(n_agents)]
+    for j in range(n_agents):
+        for i in range(n_agents):
+            if i != j and W_row[i, j] > 0:
+                out_neighbors[j].append(i)
+
+    P = np.zeros((n_agents, n_agents), dtype=float)
+    for j in range(n_agents):
+        receivers = [j] + out_neighbors[j]
+        weight = 1.0 / len(receivers)
+        for i in receivers:
+            P[i, j] = weight
+    return P
+
+
+def run_push_sum_dgd_directed(
+    agents,
+    P_col,
+    alpha_star,
+    step,
+    n_iters,
+    x0=None,
+    seed=0,
+    random_init=False,
+):
+    """
+    DGD Push-Sum pour graphe orienté (matrice colonne-stochastique P_col).
+    """
+    rng = np.random.default_rng(seed)
+    P_col = np.asarray(P_col, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+
+    if x0 is not None:
+        base = np.asarray(x0, dtype=float).reshape(-1)
+        X = np.tile(base, (n_agents, 1))
+    elif random_init:
+        X = rng.normal(0.0, 1e-3, size=(n_agents, m))
+    else:
+        X = np.zeros((n_agents, m), dtype=float)
+
+    w = np.ones(n_agents, dtype=float)
+    Z = X / w[:, None]
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        G = np.vstack([local_gradient(Z[i], agents[i]) for i in range(n_agents)])
+        X = P_col @ X - step * G
+        w = np.clip(P_col @ w, 1e-12, None)
+        Z = X / w[:, None]
+        _record_opt_gap(history, Z, alpha_star)
+
+    history['alphas'] = Z
+    history['alpha_mean'] = np.mean(Z, axis=0)
+    return history
 
 
 def run_dgd_dp(
