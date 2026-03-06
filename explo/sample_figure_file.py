@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-# matplotlib setup
+# Configuration de matplotlib
 import matplotlib
-# adjust the font size accordingly
+# Ajuster la taille de police
 font = {'family' : 'sans',
         'size'   : 12}
 
@@ -18,11 +18,11 @@ plt.plot(x, y, label='a sinusoid')
 plt.grid()
 plt.legend()
 
-# Label your axes and title
+# Ajouter les labels des axes et le titre
 plt.xlabel(r'The $x$ coordinate')
 plt.ylabel(r'The $y$ coordinate')
 plt.title('A sample graph')
 
-# Save your figure in .pdf
+# Sauvegarder la figure en .pdf
 plt.tight_layout()
 plt.savefig('Samplefig.pdf')

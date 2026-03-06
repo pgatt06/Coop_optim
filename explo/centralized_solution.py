@@ -24,13 +24,13 @@ def Cov2(x1,x2):
 def solve(x,y, selection=True):
     n = len(x)
 
-    # you can either select the points among the ones you have:
+    # On peut soit sélectionner les points parmi les données disponibles :
     if selection:
         sel = [i for i in range(n)]
         ind = np.random.choice(sel, int(np.sqrt(n)), replace=False)
         x2 = [x[i] for i in ind]
 
-    # or take them uniformly distributed
+    # Ou les prendre uniformément distribués
     else:
         x2 = np.linspace(-1, 1, 10)
         ind = []
@@ -39,10 +39,11 @@ def solve(x,y, selection=True):
     A = (0.5**2)*Cov(x2) + M.T @ M
     b = M.T @ y
 
-    # here the regularization parameter nu is 1.0
+    # Ici, le paramètre de régularisation nu vaut 1.0
     A = A + 1.*np.eye(int(np.sqrt(n)))
 
-    # it is good to compute the max/min eigenvalues of A for later, but only for small-size matrices
+    # Il est utile de calculer les valeurs propres min/max de A,
+    # mais seulement pour des petites matrices
     if n<101:
         ei, EI =np.linalg.eig(A)
         vv = [min(ei), max(ei)]
@@ -72,18 +73,4 @@ def plot_me(x,y, alpha, ind, selection=True):
     plt.show()
 
 
-# """
-# Main follows
-# """
-
-# with open('first_database.pkl', 'rb') as f:
-#    x,y = pickle.load(f)
-
-
-# num_points = 100
-# alpha, ind = solve(x[:num_points],y[:num_points], selection=True)
-
-# print('Result summary -----------------')
-# print('Optimal centralised alpha = ', alpha)
-
-# plot_me(x[:num_points],y[:num_points], alpha, ind, selection=True)
+# Programme principal : exemple d'appel volontairement omis ici.
