@@ -1,0 +1,274 @@
+import numpy as np
+
+from .distributed_objectives import local_gradient
+
+
+def _init_alphas(n_agents, m, x0=None, seed=0, random_init=False):
+    if x0 is not None:
+        x0 = np.asarray(x0, dtype=float).reshape(-1)
+        return np.tile(x0, (n_agents, 1))
+    if random_init:
+        rng = np.random.default_rng(seed)
+        return rng.normal(0.0, 1e-3, size=(n_agents, m))
+    return np.zeros((n_agents, m), dtype=float)
+
+
+def _record_opt_gap(history, alphas, alpha_star):
+    alpha_star = np.asarray(alpha_star, dtype=float).reshape(-1)
+    gaps = np.linalg.norm(alphas - alpha_star.reshape(1, -1), axis=1)
+    history['mean_gap'].append(float(np.mean(gaps)))
+    history['max_gap'].append(float(np.max(gaps)))
+    mean_alpha = np.mean(alphas, axis=0, keepdims=True)
+    history['consensus_gap'].append(float(np.max(np.linalg.norm(alphas - mean_alpha, axis=1))))
+
+
+def _prepare_local_data(agents):
+    return [(agent['M'], agent['y'], agent['Q'], agent['b']) for agent in agents]
+
+
+def run_dgd(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
+    """
+    DGD :
+        alpha_i^{t+1} = sum_j W_ij alpha_j^t - eta * grad f_i(alpha_i^t)
+    """
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, seed=seed, random_init=random_init)
+    local_data = _prepare_local_data(agents)
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        new_alphas = np.zeros_like(alphas)
+        for i, agent in enumerate(agents):
+            grad_i = local_gradient(alphas[i], agent)
+            new_alphas[i] = W[i, :] @ alphas - step * grad_i
+        alphas = new_alphas
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    return history
+
+
+def run_gradient_tracking(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
+    """
+    Suivi de gradient.
+    """
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, seed=seed, random_init=random_init)
+
+    trackers = np.zeros((n_agents, m), dtype=float)
+    for i, agent in enumerate(agents):
+        trackers[i] = local_gradient(alphas[i], agent)
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        new_alphas = np.zeros_like(alphas)
+        new_trackers = np.zeros_like(trackers)
+        for i, agent in enumerate(agents):
+            grad_k = local_gradient(alphas[i], agent)
+            new_alphas[i] = W[i, :] @ alphas - step * trackers[i]
+            grad_k1 = local_gradient(new_alphas[i], agent)
+            new_trackers[i] = W[i, :] @ trackers - grad_k + grad_k1
+        alphas = new_alphas
+        trackers = new_trackers
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    return history
+
+
+def _edge_data_from_W(W):
+    W = np.asarray(W, dtype=float)
+    undirected_edges = []
+    directed_edges = []
+    n_agents = W.shape[0]
+    for i in range(n_agents):
+        for j in range(n_agents):
+            if i != j and W[i, j] > 0:
+                directed_edges.append((i, j))
+                if i > j and W[j, i] > 0:
+                    undirected_edges.append((i, j))
+    return undirected_edges, directed_edges
+
+
+def run_dual_decomposition(agents, W, alpha_star, step, n_iters, x0=None):
+    """
+    Décomposition duale pair-à-pair.
+    Les variables duales (lambdas) vivent sur les arêtes non orientées (i,j) avec i>j.
+    """
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, random_init=False)
+    undirected_edges, _ = _edge_data_from_W(W)
+    lambdas = {edge: np.zeros(m, dtype=float) for edge in undirected_edges}
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        for i, agent in enumerate(agents):
+            dual_sum = np.zeros(m, dtype=float)
+            for j in range(n_agents):
+                if i == j or W[i, j] <= 0:
+                    continue
+                if j < i and (i, j) in lambdas:
+                    dual_sum += lambdas[(i, j)]
+                elif j > i and (j, i) in lambdas:
+                    dual_sum -= lambdas[(j, i)]
+            alphas[i] = np.linalg.solve(agent['Q'], agent['b'] - dual_sum)
+
+        for (i, j) in lambdas:
+            lambdas[(i, j)] += step * (alphas[i] - alphas[j])
+
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    history['lambdas'] = lambdas
+    return history
+
+
+def run_consensus_admm(agents, W, alpha_star, rho, n_iters, x0=None):
+    """
+    ADMM de consensus.
+    - lambda_(i,j) et y_(i,j) pour chaque arête orientée
+    - alpha_i local résolu exactement à chaque itération
+    """
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, random_init=False)
+    _, directed_edges = _edge_data_from_W(W)
+
+    lambdas = {edge: np.zeros(m, dtype=float) for edge in directed_edges}
+    y_edges = {edge: np.zeros(m, dtype=float) for edge in directed_edges}
+
+    inv_A = []
+    for i, agent in enumerate(agents):
+        degree_i = int(np.sum(W[i, :] > 0) - 1)
+        inv_A.append(np.linalg.inv(agent['Q'] + rho * degree_i * np.eye(m)))
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for _ in range(n_iters):
+        new_alphas = np.zeros_like(alphas)
+        for i, agent in enumerate(agents):
+            prox_sum = np.zeros(m, dtype=float)
+            for j in range(n_agents):
+                if i != j and W[i, j] > 0:
+                    prox_sum += y_edges[(i, j)] - lambdas[(i, j)] / rho
+            new_alphas[i] = inv_A[i] @ (agent['b'] + rho * prox_sum)
+
+        alphas = new_alphas
+        for (i, j) in directed_edges:
+            y_edges[(i, j)] = 0.5 * (alphas[i] + alphas[j])
+            lambdas[(i, j)] += rho * (alphas[i] - y_edges[(i, j)])
+
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    history['lambdas'] = lambdas
+    history['y_edges'] = y_edges
+    return history
+
+
+def get_corrupted_context(W_base, mode='normal', p_loss=0.2, p_active=0.4, seed=None):
+    rng = np.random.default_rng(seed)
+    W_t = np.asarray(W_base, dtype=float).copy()
+    n_agents = W_t.shape[0]
+    active_mask = np.ones(n_agents, dtype=bool)
+
+    if mode == 'directed':
+        for i in range(n_agents):
+            for j in range(i + 1, n_agents):
+                if W_t[i, j] > 0 or W_t[j, i] > 0:
+                    if rng.random() < 0.5:
+                        W_t[i, j] = 0.0
+                    else:
+                        W_t[j, i] = 0.0
+
+    elif mode == 'loss':
+        for i in range(n_agents):
+            for j in range(n_agents):
+                if i != j and W_t[i, j] > 0 and rng.random() < p_loss:
+                    W_t[i, j] = 0.0
+        for i in range(n_agents):
+            row_sum = np.sum(W_t[i, :])
+            if row_sum > 0:
+                W_t[i, :] /= row_sum
+
+    elif mode == 'async':
+        active_mask = rng.random(n_agents) < p_active
+        if not np.any(active_mask):
+            active_mask[rng.integers(0, n_agents)] = True
+
+    return W_t, active_mask
+
+
+def run_dgd_dp(
+    agents,
+    W,
+    alpha_star,
+    epsilon,
+    n_iters,
+    sensitivity=0.5,
+    x0=None,
+    seed=0,
+):
+    rng = np.random.default_rng(seed)
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, random_init=False)
+    b_scale = sensitivity / float(epsilon)
+
+    def gamma_k(t):
+        return 0.5 / (1.0 + 0.1 * np.sqrt(t + 1.0))
+
+    def alpha_k(t):
+        return 0.001 / (1.0 + 0.01 * t)
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    for t in range(n_iters):
+        noisy = alphas + rng.laplace(0.0, b_scale, size=(n_agents, m))
+        new_alphas = alphas.copy()
+        for i, agent in enumerate(agents):
+            grad_i = local_gradient(alphas[i], agent)
+            diff_sum = np.zeros(m, dtype=float)
+            for j in range(n_agents):
+                if i != j and W[i, j] != 0:
+                    diff_sum += W[i, j] * (noisy[j] - alphas[i])
+            new_alphas[i] = alphas[i] + gamma_k(t) * diff_sum - alpha_k(t) * grad_i
+        alphas = new_alphas
+        _record_opt_gap(history, alphas, alpha_star)
+
+    history['alphas'] = alphas
+    history['alpha_mean'] = np.mean(alphas, axis=0)
+    return history
+
+
+def run_push_sum_dgd(W, n_iters, alpha_star, agents, step, seed=0):
+    """Bonus : DGD Push-Sum orienté."""
+    rng = np.random.default_rng(seed)
+    W = np.asarray(W, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    x = rng.normal(0.0, 1e-3, size=(n_agents, m))
+    phi = np.ones((n_agents, 1), dtype=float)
+    history = {'mean_gap': []}
+
+    for _ in range(n_iters):
+        x = W @ x
+        phi = np.clip(W @ phi, 1e-12, None)
+        z = x / phi
+        grad = np.vstack([local_gradient(z[i], agents[i]) for i in range(n_agents)])
+        x = x - step * grad
+        z_mean = np.mean(x / phi, axis=0)
+        history['mean_gap'].append(float(np.linalg.norm(z_mean - alpha_star)))
+
+    history['alpha_mean'] = np.mean(x / phi, axis=0)
+    return history
