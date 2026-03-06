@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 # Chemin du dataset principal (Partie I).
 DATA_PATH = Path("data/first_database.pkl")
 # Dossier de sortie des logs/figures (ici: dossier courant).
-OUT_DIR = Path(".")
+OUT_DIR = Path("./tools/largest_n_possible_output")
 
 # n de départ pour la recherche.
 N_MIN = 100
@@ -50,7 +50,7 @@ NU = 1.0
 # Seuil de gap pour la métrique « itérations pour atteindre le seuil ».
 THRESHOLD = 1.0
 # Nombre max d'itérations de probe par évaluation de n.
-T_PROBE = 120
+T_PROBE = 300
 # Facteur de croissance en phase exponentielle (ex: 2 => doublement).
 GROWTH = 2.0
 # Nombre total max d'évaluations de n (exp + dichotomie).
@@ -64,7 +64,7 @@ TOTAL_TIME_BUDGET = 1800.0
 # Critère de stabilité: gap_final / gap_initial doit rester <= MAX_GROWTH.
 MAX_GROWTH = 10.0
 # Critère de progrès: au moins une méthode doit finir <= PROGRESS_RATIO * initial.
-PROGRESS_RATIO = 0.95
+PROGRESS_RATIO = 0.85
 # Graine aléatoire globale (initialisations DGD/GT + reproductibilité).
 SEED = 0
 
