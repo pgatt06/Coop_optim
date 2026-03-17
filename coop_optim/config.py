@@ -5,7 +5,7 @@ N_PART1 = 100
 M_PART1 = 10
 N_AGENTS = 5
 GRID_SIZE = 250
-MAX_ITERS = int(10e3)
+MAX_ITERS = int(10e4)
 
 # Partie I - rupture de convergence / push-sum
 BREAK_ITERS = 2500
