@@ -289,6 +289,58 @@ def run_dgd_packet_loss(
     return history
 
 
+def run_dual_decomposition_packet_loss(agents, W_base, alpha_star, step, n_iters, p_loss=0.3, x0=None, seed=0):
+    """
+    Décomposition Duale avec pertes de paquets.
+    Si un paquet est perdu sur l'arête (i,j), la variable duale lambda_ij n'est pas mise à jour.
+    """
+    rng = np.random.default_rng(seed)
+    W_base = np.asarray(W_base, dtype=float)
+    n_agents = len(agents)
+    m = alpha_star.size
+    alphas = _init_alphas(n_agents, m, x0=x0, random_init=False)
+    
+    # On identifie les arêtes existantes dans le graphe de base
+    undirected_edges, _ = _edge_data_from_W(W_base)
+    lambdas = {edge: np.zeros(m, dtype=float) for edge in undirected_edges}
+
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
+    
+    for _ in range(n_iters):
+        # 1. Étape Primale : Toujours la même (résolution exacte locale)
+        for i, agent in enumerate(agents):
+            dual_sum = np.zeros(m, dtype=float)
+            for j in range(n_agents):
+                if i == j or W_base[i, j] <= 0:
+                    continue
+                
+                # Simulation de la perte de paquet : si l'arête échoue, 
+                # l'agent i ne "voit" pas la contrainte avec j pour cette itération
+                if rng.random() > p_loss: 
+                    if j < i and (i, j) in lambdas:
+                        dual_sum += lambdas[(i, j)]
+                    elif j > i and (j, i) in lambdas:
+                        dual_sum -= lambdas[(j, i)]
+            
+            alphas[i] = np.linalg.solve(agent['Q'], agent['b'] - dual_sum)
+
+        # 2. Étape Duale : Mise à jour des multiplicateurs seulement si le lien est actif
+        for (i, j) in lambdas:
+            if rng.random() > p_loss: # Si le lien fonctionne
+                lambdas[(i, j)] += step * (alphas[i] - alphas[j])
+
+        _record_opt_gap(history, alphas, alpha_star)
+
+    return history
+
+
+
+
+
+
+
+
+
 def run_async_dgd(
     agents,
     W,
@@ -433,24 +485,63 @@ def run_dgd_dp(
     return history
 
 
-def run_push_sum_dgd(W, n_iters, alpha_star, agents, step, seed=0):
-    """Bonus : DGD Push-Sum orienté."""
+# def run_push_sum_dgd(W, n_iters, alpha_star, agents, step, seed=0):
+#     """Bonus : DGD Push-Sum orienté."""
+#     rng = np.random.default_rng(seed)
+#     W = np.asarray(W, dtype=float)
+#     n_agents = len(agents)
+#     m = alpha_star.size
+#     x = rng.normal(0.0, 1e-3, size=(n_agents, m))
+#     phi = np.ones((n_agents, 1), dtype=float)
+#     history = {'mean_gap': []}
+
+#     for _ in range(n_iters):
+#         x = W @ x
+#         phi = np.clip(W @ phi, 1e-12, None)
+#         z = x / phi
+#         grad = np.vstack([local_gradient(z[i], agents[i]) for i in range(n_agents)])
+#         x = x - step * grad
+#         z_mean = np.mean(x / phi, axis=0)
+#         history['mean_gap'].append(float(np.linalg.norm(z_mean - alpha_star)))
+
+#     history['alpha_mean'] = np.mean(x / phi, axis=0)
+#     return history
+
+def run_push_sum_dgd_directed(agents, P_col, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
     rng = np.random.default_rng(seed)
-    W = np.asarray(W, dtype=float)
+    P_col = np.asarray(P_col, dtype=float)
     n_agents = len(agents)
     m = alpha_star.size
-    x = rng.normal(0.0, 1e-3, size=(n_agents, m))
-    phi = np.ones((n_agents, 1), dtype=float)
-    history = {'mean_gap': []}
+
+    # Initialisation
+    if x0 is not None:
+        X = np.tile(np.asarray(x0).reshape(-1), (n_agents, 1))
+    elif random_init:
+        X = rng.normal(0.0, 1e-3, size=(n_agents, m))
+    else:
+        X = np.zeros((n_agents, m), dtype=float)
+
+    w = np.ones(n_agents, dtype=float)
+    # Z est la variable de décision réelle (X divisé par le poids w)
+    Z = X / w[:, None]
+
+    # Utilisation du même dictionnaire history que les autres
+    history = {'mean_gap': [], 'max_gap': [], 'consensus_gap': []}
 
     for _ in range(n_iters):
-        x = W @ x
-        phi = np.clip(W @ phi, 1e-12, None)
-        z = x / phi
-        grad = np.vstack([local_gradient(z[i], agents[i]) for i in range(n_agents)])
-        x = x - step * grad
-        z_mean = np.mean(x / phi, axis=0)
-        history['mean_gap'].append(float(np.linalg.norm(z_mean - alpha_star)))
+        # Calcul du gradient sur la variable corrigée Z
+        G = np.vstack([local_gradient(Z[i], agents[i]) for i in range(n_agents)])
+        
+        # Mise à jour Push-Sum
+        X = P_col @ X - step * G
+        w = np.clip(P_col @ w, 1e-12, None) # Éviter la division par zéro
+        
+        # Mise à jour de la variable locale
+        Z = X / w[:, None]
+        
+        # C'EST ICI QUE ÇA CHANGE : on enregistre le Max Gap
+        _record_opt_gap(history, Z, alpha_star)
 
-    history['alpha_mean'] = np.mean(x / phi, axis=0)
+    history['alphas'] = Z
+    history['alpha_mean'] = np.mean(Z, axis=0)
     return history

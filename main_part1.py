@@ -38,6 +38,7 @@ from coop_optim.algorithms import (
     run_consensus_admm,
     make_directed_row_stochastic,
     run_dgd_packet_loss,
+    run_dual_decomposition_packet_loss,
     run_async_dgd,
     build_column_stochastic_pushsum,
     run_push_sum_dgd_directed,
@@ -169,6 +170,8 @@ def run():
         seed=SEED,
         random_init=False,
     )
+    
+    
     hist_async = run_async_dgd(
         agents,
         W_line,
@@ -192,6 +195,48 @@ def run():
         title='Part I - rupture de convergence',
     )
 
+    
+    
+    
+    # ===========================
+    # Dual decomposition - pertes de paquets
+    # ===========================
+    hist_dd_baseline = run_dual_decomposition(
+        agents, 
+        W_line, 
+        alpha_star, 
+        step=step_dual, 
+        n_iters=BREAK_ITERS
+    )
+    hist_dd_directed = run_dual_decomposition(
+        agents, 
+        W_directed, 
+        alpha_star, 
+        step=step_dual, 
+        n_iters=BREAK_ITERS
+    )
+    # Version Duale avec perte de paquets
+    hist_loss_dual = run_dual_decomposition_packet_loss(
+        agents,
+        W_line,
+        alpha_star,
+        step=step_dual, # Utilise le step_dual défini plus haut (0.01)
+        n_iters=BREAK_ITERS,
+        p_loss=P_LOSS,
+        seed=SEED
+    )
+    
+    save_history_plot(
+        {
+            'DC non orienté': hist_dd_baseline['mean_gap'],
+            'DC orienté': hist_dd_directed['mean_gap'],
+            'DC pertes de paquets': hist_loss_dual['mean_gap'],
+        },
+        os.path.join(FIG_DIR, 'part1_break_convergence_dc.pdf'),
+        ylabel=r'Mean $\|\alpha_i^t-\alpha^*\|$',
+        title='Part I - rupture de convergence',
+    )
+    
     # =========================
     # Push-sum (cas orienté)
     # =========================
@@ -210,11 +255,13 @@ def run():
 
     save_history_plot(
         {
-            'DGD orienté': hist_directed['mean_gap'],
-            'Push-sum DGD': hist_ps['mean_gap'],
+            # 'DGD orienté': hist_directed['mean_gap'],
+            # 'Push-sum DGD': hist_ps['mean_gap'],
+            'DGD orienté': hist_directed['max_gap'],
+            'Push-sum DGD': hist_ps['max_gap'],
         },
         os.path.join(FIG_DIR, 'part1_pushsum_recovery.pdf'),
-        ylabel=r'Mean $\|\alpha_i^t-\alpha^*\|$',
+        ylabel=r'Max $\|\alpha_i^t-\alpha^*\|$',
         title='Part I - récupération push-sum',
     )
 
