@@ -15,3 +15,7 @@ def cov_matrix(x_landmarks):
 
 def cross_cov_matrix(x_data, x_landmarks):
     return rbf_kernel(x_data, x_landmarks)
+
+
+def predict(alpha, x_query, x_landmarks):
+    return cross_cov_matrix(x_query, x_landmarks) @ as_1d(alpha)

@@ -8,6 +8,7 @@ from .plotting import save_agent_gap_grid_plot
 
 
 def run():
+    """Execute the full Part III private DGD suite."""
     ensure_dir(str(FIGURES_DIR))
     first_db = DATA_DIR / "first_database.pkl"
     if not first_db.exists():

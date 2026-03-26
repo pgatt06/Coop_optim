@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .data_utils import ensure_dir
+from .kernel_utils import predict
 
 plt.rc("font", family="sans-serif", size=12)
 
@@ -87,6 +88,49 @@ def save_dataset_plot(x, y, path, landmark_indices):
     plt.ylabel(r"$y$")
     plt.title("Dataset and Nyström landmarks")
     plt.legend()
+    plt.tight_layout()
+    ensure_dir(os.path.dirname(path))
+    plt.savefig(path)
+    plt.close()
+
+
+def save_xy_plot(series, path, ylabel, title, xlabel, xscale="linear", yscale="linear"):
+    plt.figure(figsize=(6.8, 4.6))
+    for label, values in series.items():
+        if isinstance(values, dict):
+            x = np.asarray(values["x"], dtype=float)
+            y = np.asarray(values["y"], dtype=float)
+        else:
+            x, y = values
+            x = np.asarray(x, dtype=float)
+            y = np.asarray(y, dtype=float)
+        if yscale == "log":
+            y = np.maximum(y, 1e-16)
+        plt.plot(x, y, marker="o", lw=1.8, label=label)
+    plt.xscale(xscale)
+    plt.yscale(yscale)
+    plt.grid(True, which="both", alpha=0.35)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    ensure_dir(os.path.dirname(path))
+    plt.savefig(path)
+    plt.close()
+
+
+def save_reconstruction_plot(alpha_methods, x_train, y_train, x_query, x_landmarks, path, title):
+    plt.figure(figsize=(8.2, 4.8))
+    plt.scatter(x_train, y_train, s=18, alpha=0.45, label="Training points")
+    for label, alpha in alpha_methods.items():
+        lw = 2.2 if "Centralized" in label else 1.7
+        plt.plot(x_query, predict(alpha, x_query, x_landmarks), lw=lw, label=label)
+    plt.grid(True, alpha=0.35)
+    plt.xlabel(r"$x$")
+    plt.ylabel(r"$f(x)$")
+    plt.title(title)
+    plt.legend(ncol=2)
     plt.tight_layout()
     ensure_dir(os.path.dirname(path))
     plt.savefig(path)

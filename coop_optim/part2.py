@@ -19,6 +19,7 @@ from .plotting import save_semilogy_plot
 
 
 def run():
+    """Execute the full Part II federated-learning suite."""
     ensure_dir(str(FIGURES_DIR))
     second_db = DATA_DIR / "second_database.pkl"
     if not second_db.exists():

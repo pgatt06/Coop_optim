@@ -2,7 +2,7 @@ import numpy as np
 
 from .data_utils import as_1d
 from .distributed_objectives import grad_all, optimality_gap
-from .graphs import adjacency_from_weights, incidence_matrix, undirected_edges
+from .graphs import adjacency_from_weights, incidence_matrix, metropolis_weights, undirected_edges
 
 
 def _init_alphas(n_agents, m, x0=None, seed=0, random_init=False):
@@ -67,6 +67,7 @@ def _block_diag(blocks):
 
 
 def dual_lipschitz_constant(agents, graph):
+    """Compute the dual smoothness constant used for dual decomposition."""
     B = _as_incidence(graph)
     m = agents[0]["H"].shape[0]
     H_inv = _block_diag([agent["H_inv"] for agent in agents])
@@ -76,6 +77,7 @@ def dual_lipschitz_constant(agents, graph):
 
 
 def run_dgd(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
+    """Run decentralized gradient descent with a fixed mixing matrix."""
     W = np.asarray(W, dtype=float)
     alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
     history = _init_history()
@@ -87,6 +89,7 @@ def run_dgd(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=F
 
 
 def run_gradient_tracking(agents, W, alpha_star, step, n_iters, x0=None, seed=0, random_init=False):
+    """Run gradient tracking with a fixed mixing matrix."""
     W = np.asarray(W, dtype=float)
     alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
     grads = grad_all(agents, alphas)
@@ -102,7 +105,70 @@ def run_gradient_tracking(agents, W, alpha_star, step, n_iters, x0=None, seed=0,
     return _finalize_history(history, alphas)
 
 
+def random_loss_mixing(adj, p_loss, rng):
+    """Sample a Metropolis matrix after randomly dropping undirected links."""
+    adj = np.asarray(adj, dtype=int).copy()
+    for i in range(adj.shape[0]):
+        for j in range(i + 1, adj.shape[1]):
+            if adj[i, j] == 1 and rng.random() < p_loss:
+                adj[i, j] = 0
+                adj[j, i] = 0
+    return metropolis_weights(adj)
+
+
+def run_dgd_packet_loss(agents, adj, alpha_star, step, n_iters, p_loss=0.3, seed=0, x0=None, random_init=True):
+    """Run DGD under random packet losses modeled as edge drops."""
+    rng = np.random.default_rng(seed)
+    alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
+    history = _init_history()
+    for _ in range(n_iters):
+        W_t = random_loss_mixing(adj, p_loss=p_loss, rng=rng)
+        grads = grad_all(agents, alphas)
+        alphas = W_t @ alphas - step * grads
+        _record_history(history, alphas, alpha_star)
+    return _finalize_history(history, alphas)
+
+
+def run_async_dgd(agents, W, alpha_star, step, n_iters, p_active=0.35, seed=0, x0=None, random_init=True):
+    """Run a partially asynchronous DGD variant with random active agents."""
+    rng = np.random.default_rng(seed)
+    W = np.asarray(W, dtype=float)
+    alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
+    history = _init_history()
+    for _ in range(n_iters):
+        grads = grad_all(agents, alphas)
+        alphas_mix = W @ alphas
+        active = rng.random(len(agents)) < p_active
+        alphas_next = alphas_mix.copy()
+        alphas_next[active] -= step * grads[active]
+        alphas = alphas_next
+        _record_history(history, alphas, alpha_star)
+    return _finalize_history(history, alphas)
+
+
+def run_push_sum_dgd(agents, P_col, alpha_star, step, n_iters, x0=None, seed=0, random_init=True):
+    """Run push-sum DGD on a directed graph with column-stochastic communication."""
+    P_col = np.asarray(P_col, dtype=float)
+    X = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
+    w = np.ones(len(agents), dtype=float)
+    Z = X / w[:, None]
+
+    history = _init_history()
+    for _ in range(n_iters):
+        grads = grad_all(agents, Z)
+        X = P_col @ X - step * grads
+        w = P_col @ w
+        Z = X / np.maximum(w[:, None], 1e-16)
+        _record_history(history, Z, alpha_star)
+
+    history = _finalize_history(history, Z)
+    history["push_sum_weights"] = w
+    history["raw_states"] = X
+    return history
+
+
 def run_dual_decomposition(agents, graph, alpha_star, step, n_iters):
+    """Run the dual decomposition method on an undirected graph."""
     B = _as_incidence(graph)
     n_edges = B.shape[1]
     m = alpha_star.size
@@ -121,6 +187,7 @@ def run_dual_decomposition(agents, graph, alpha_star, step, n_iters):
 
 
 def run_consensus_admm(agents, graph, alpha_star, rho, n_iters):
+    """Run edge-based consensus ADMM on an undirected graph."""
     adj = _as_adjacency(graph)
     edges = undirected_edges(adj)
     n_agents = len(agents)
@@ -171,6 +238,7 @@ def run_consensus_admm(agents, graph, alpha_star, rho, n_iters):
 
 
 def clip_rows(gradients, clip_norm):
+    """Clip each row to a prescribed Euclidean norm."""
     gradients = np.asarray(gradients, dtype=float)
     norms = np.linalg.norm(gradients, axis=1, keepdims=True)
     scale = np.minimum(1.0, clip_norm / (norms + 1e-12))
@@ -190,6 +258,7 @@ def run_dgd_dp(
     seed=0,
     random_init=False,
 ):
+    """Run the noisy clipped DGD-DP baseline used in Part III."""
     rng = np.random.default_rng(seed)
     W = np.asarray(W, dtype=float)
     alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
