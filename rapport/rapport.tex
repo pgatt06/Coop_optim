@@ -144,8 +144,104 @@ The line graph is representative: the worst final DGD gap is \(7.93\times 10^{-2
 \label{fig:graph_compare}
 \end{figure}
 
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_dual_graph_compare.pdf}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_admm_graph_compare.pdf}
+\end{minipage}
+\caption{Influence of the graph topology on the averaged iterate for Dual decomposition (left) and ADMM (right).}
+\label{fig:graph_compare}
+\end{figure}
+
 Topology affects the methods differently. For DGD, better mixing mostly improves the transient phase and allows a larger admissible step; because \(\eta_{\mathrm{DGD}}\propto (1-\beta)/L_{\max}\), the final bias is therefore not strictly monotone in \(\beta\). For GT, the curves align much faster and all end at machine precision, confirming that the tracking term removes the steady-state bias observed in DGD. Dual decomposition and ADMM also reach the exact solution here because the consensus problem is quadratic, strongly convex, and solved through closed-form local updates.
 
+
+
+We can also take a look at the function reconstruction for each algorithm. 
+\begin{figure}[H]
+\centering
+\includegraphics[width=.92\linewidth]{part1_reconstruction_compare.pdf}
+\caption{Visualisation of the functions for each algorithms.}
+\label{fig:line}
+\end{figure}
+We can see that for \textbf{DGD}, the curve is slightly offset from the others. This may be due to its bias, since a constant step size was used here. There is still an error. If we look at \textbf{GT}, \textbf{ADMM}, and \textbf{DC}, the three curves are virtually indistinguishable.
+
+\bigskip
+We can try changing several parameters on the communication graphs to see how they affect the algorithms and their convergence: Directed, Packet loss, Asynchronous. 
+For now, if we make these changes, we obtain the following results for the DGD:
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{part1_break_convergence.pdf}
+    \caption{Convergence broken}
+    \label{fig:visualisation}
+\end{figure}
+
+Because of these modifcations, we can use the Push-sum algorithm to solve the convergence problem. We have tried to implement it on DGD. Here are the results. This method helps DGD to have a lower error and converge faster.  
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{part1_push_sum_recovery.pdf}
+    \caption{Convergence broken}
+    \label{fig:visualisation}
+\end{figure}
+
+
+Finally, we can study the case of a larger \textbf{n}.In order to maintain a valid Nyström approximation, we increase the model dimension $m$ in proportion to $\sqrt{n}$.
+
+ We have implemented a dynamic search procedure to determine the system's maximum capacity. The algorithm iteratively increases $n$ and measures two key metrics:
+\begin{itemize}
+    \item \textbf{Final accuracy}: The optimality gap reached after a fixed number of iterations.
+    \item \textbf{Convergence rate}: The number of iterations required to fall below a critical threshold.
+\end{itemize}
+
+Examining the generated figures (speed vs. $n$) allows us to draw several conclusions:
+\begin{enumerate}
+    \item \textbf{Computational Complexity}: Although the problem is distributed among $a$ agents, an increase in $n$ (and thus in $m$) increases the cost of each local operation.
+    \item \textbf{Consensus cost}: As $n$ increases, the structure of the problem becomes more complex, and the number of iterations required to reach consensus increases. 
+\end{enumerate}
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_scaling_final_gap.pdf}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_scaling_iterations.pdf}
+\end{minipage}
+\caption{Speed and optimality ga}
+\label{fig:graph_compare}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_scaling_surrogates.pdf}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{part1_scaling_functions.pdf}
+\end{minipage}
+\caption{Functions visualisation}
+\label{fig:graph_compare}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{part1_scaling_best_tuned.pdf}
+    \caption{The maximum found is \textbf{8192}}
+    \label{fig:visualisation}
+\end{figure}
 \section{Federated learning}
 
 The second dataset contains five clients with 20 points each. The global objective keeps the same Nyström structure:
@@ -192,37 +288,43 @@ The results display the usual trade-off. For \(E=50\), descent per communication
 
 The optional comparison with SCAFFOLD, run with \(C=3\) and \(E=5\), gives a final error \(2.03\times 10^{-2}\) for FedAvg versus \(2.13\times 10^{-14}\) for SCAFFOLD. This is consistent with the theory: the control variates compensate for client drift and become especially useful as soon as not all clients participate at every round.
 
-\section{Differential privacy}
+\section{Differential privacy }
 
-The private update reuses DGD on the line graph:
+To solve the regression problem in a distributed manner while ensuring local data privacy, we implement the DGD-DP algorithm. Following the framework of \textbf{Theorem 2} from \cite{arXiv:2202.01113}, the private update rule is defined as follows:
 \[
-\alpha^{t+1}=W\alpha^t-\eta\bigl(\tilde g^t+\xi^t\bigr),
+\alpha^{k+1} = \alpha^k + \gamma_k \bigl( W(\alpha^k + \zeta^k) - \alpha^k \bigr) - \eta_k g^k
 \]
-where \(\tilde g_i^t\) is the clipped local gradient and \(\xi_i^t\sim\mathcal N(0,\sigma_{\mathrm{DP}}^2I)\). Clipping is defined by
-\[
-\tilde g_i^t=g_i^t \min\!\left(1,\frac{c}{\norm{g_i^t}}\right),
-\qquad c=5,
-\]
-which bounds sensitivity, and the Gaussian noise is calibrated as
-\[
-\sigma_{\mathrm{DP}}=\frac{2c\sqrt{2\log(1.25/\delta)}}{\epsilon\sqrt{T}},
-\qquad
-\delta=10^{-5}.
-\]
-The step size is kept equal to the deterministic DGD step on the line graph,
-\[
-\eta_{\mathrm{DP}}=8.693\times 10^{-4},
-\]
-so that different privacy levels are compared under the same stability condition. With a constant step and additive Gaussian noise, exact convergence is not expected; instead, the method should stabilize in a neighborhood whose size increases with \(\sigma_{\mathrm{DP}}\).
+where $g_i^k$ is the local gradient and $\zeta_i^k$ represents the additive Laplace noise injected during the communication step.
 
+\paragraph{Noise Mechanism and Sensitivity}
+To satisfy $\epsilon$-differential privacy requirements, the noise is drawn from a Laplace distribution $\zeta_i^k \sim \text{Lap}(0, \nu)$, where the scale parameter $\nu$ is calibrated based on the local sensitivity $C$ and the privacy budget $\epsilon$:
+\[
+\nu = \frac{C}{\epsilon}
+\]
+In this implementation, rather than using explicit clipping, we assume the local gradient sensitivity is naturally bounded by $C = 0.01$. This choice of $\nu$ ensures that the privacy budget is respected at each exchange, protecting the local model parameters from being reconstructed by neighboring agents.
+
+\paragraph{Convergence Conditions}
+The persistent injection of noise necessitates the use of decaying step-size sequences to ensure stability and convergence toward the optimal solution $\alpha^*$. We employ the following polynomial decay schedules:
+\[
+\gamma_k = \frac{1}{1 + 0.001 \cdot k^{0.9}}, \qquad \eta_k = \frac{0.002}{1 + 0.001 \cdot k}
+\]
+\begin{itemize}
+    \item \textbf{$\epsilon = 10$}: Low noise level; the scale $\nu$ is small, allowing for fast convergence that closely matches the deterministic DGD behavior.
+    \item \textbf{$\epsilon = 0.1$}: High privacy level; the large noise scale $\nu$ induces significant variance in the consensus step. However, the decaying steps $\eta_k$ and $\gamma_k$ successfully dampen these oscillations, allowing the algorithm to stabilize in a neighborhood of the optimum.
+\end{itemize}
 \begin{figure}[H]
 \centering
-\includegraphics[width=.92\linewidth]{part3_dgd_dp_epsilons.pdf}
+\includegraphics[width=.8\linewidth]{part3_dgd_dp_epsilons (1).pdf}
 \caption{Agent-wise gaps for non-private DGD and private DGD with \(\epsilon\in\{0.1,1,10\}\).}
 \label{fig:dp}
 \end{figure}
 
-The final gap of non-private DGD is \(8.05\times 10^{-2}\). The private variants stabilize around \(3.12\times 10^{-1}\), \(3.13\times 10^{-1}\), and \(3.20\times 10^{-1}\) for \(\epsilon=0.1,1,10\). The difference between the three privacy levels remains moderate in the displayed curves, not because privacy is free, but because the intrinsic DGD bias on the line graph is already a significant component of the total error. In other words, the observed plateau is dominated here by the combination \emph{consensus bias + privacy noise}.
+The analysis in Figure 12 highlights the fundamental trade-off in \textit{Differential Privacy}. 
+\begin{itemize}
+    \item \textbf{Strong privacy ($\epsilon = 0.1$)}: A high error plateau is observed. The injected Laplace noise dominates the gradient signal in the early iterations, preventing the algorithm from achieving high precision.
+    \item \textbf{Moderate privacy ($\epsilon = 10$)}: The curve converges to an error level close to that of classical DGD. The noise is sufficiently low to be absorbed by the gradient descent dynamics.
+    \item \textbf{Effect of decreasing steps}: Unlike standard DGD, the use of decreasing steps $\eta_t$ and $\gamma_t$ is vital here. It helps stabilize noise-induced oscillations, although it slows down the overall convergence rate.
+\end{itemize}
 
 \section{Conclusion}
 
