@@ -63,7 +63,7 @@ SCAFFOLD_SELECTED_CLIENTS = 3
 # Part III
 DP_ITERS = 10000
 DP_DELTA = 1e-5
-DP_CLIP_NORM = 5.0
+DP_CLIP_NORM = 0.1
 DP_EPSILONS = (0.1, 1.0, 10.0)
 
 
@@ -780,7 +780,7 @@ def clip_rows(gradients, clip_norm):
 #     history = _finalize_history(history, alphas)
 #     history["noise_std"] = float(noise_std)
 #     return history
-
+    # Pas de gradient (réduit pour éviter divergence)
 def run_dgd_dp(
     agents,
     W,
@@ -788,8 +788,8 @@ def run_dgd_dp(
     step, # Ce paramètre devient le 'step_initial' pour la décroissance
     epsilon,
     n_iters,
-    delta,
-    clip_norm=1.0, # Sensibilité C pour le clipping L1
+    delta=1e-5,
+    clip_norm=0.1, # Sensibilité C pour le clipping L1
     #x0=None,
     seed=0,
     #random_init=False,
@@ -803,46 +803,44 @@ def run_dgd_dp(
     n_agents = len(agents)
     m = alpha_star.size
     
+    
+    def gamma_k(t): return 1 / (1 + 0.001 * (t**0.9))
+    def alpha_k(t): return 0.002 / (1 + 0.001 * t)
+    
+    sensitivity = 0.01
+    scale = sensitivity / max(float(epsilon), 1e-12)
+    
+    
     # initialisation
     alphas = _init_alphas(n_agents, m, x0=None, seed=seed, random_init=False)
+    history = _init_history()
     
-    # --- Paramètres du Théorème 2 ---
-    # C est la borne du gradient. Avec clip_rows (L1), C = 2 * clip_norm
-    C_sens = 2.0 * clip_norm
-    
-    # Échelle du bruit de Laplace (nu) pour un budget epsilon total sur n_iters
-    # nu_k = (C * T) / epsilon 
-    nu_k = (C_sens * n_iters) / max(float(epsilon), 1e-12)
-
-    # Initialisation de l'historique via la fonction du binôme
-    history = _init_history() 
-
-    for k in range(n_iters):
-        # 1. Pas décroissants (Condition nécessaire du Théorème 2)
-        # On utilise le 'step' passé en argument comme base
-        eta_k = 0.002 / (1 + 0.001*k)
-        gamma_k = 1 / (1 + 0.001*(k**0.9))
+    for t in range(n_iters):
+        # 2. Génération du bruit de Laplace pour l'échange (Communication)
+        # On crée une version bruitée 'chi' uniquement pour l'envoi aux voisins
+        zeta = rng.laplace(0.0, scale, size=alphas.shape)
+        chi = alphas + zeta
         
-        # 2. Calcul des gradients 
-        #  On s'assure que clip_rows utilise la norme L1 pour être raccord avec C
-        grads = clip_rows(grad_all(agents, alphas), clip_norm=clip_norm)
+        # Calcul des gradients de tous les agents sur leur état PROPRE (alphas)
+        # (On utilise la fonction grad_all du binôme pour rester cohérent)
+        grads = grad_all(agents, alphas)
         
-        # 3. Génération du bruit de Laplace 
-        noise = rng.laplace(0.0, nu_k, size=grads.shape)
-        
-        # 4. Mise à jour DGD-DP (Mélange + Gradient bruité)
-        # x^{k+1} = x^k + gamma_k * (W - I)(x^k + noise) - eta_k * grad
-        noisy_alphas = alphas + noise
-        consensus_term = (W @ noisy_alphas) - alphas
-        
-        alphas = alphas + gamma_k * consensus_term - eta_k * grads
-        
-        
+        new_alphas = np.zeros_like(alphas)
+        for i in range(n_agents):
+            # 3. Calcul du terme de consensus bruité
+            # On compare l'état bruité des voisins (chi) avec l'état propre local (alphas[i])
+            # W[i, :] @ chi fait la moyenne pondérée des chi_j
+            consensus = W[i, :] @ (chi - alphas[i, None])
+            
+            # 4. Mise à jour de l'état local (propre)
+            # On repart de alphas[i] pour éviter d'injecter zeta_i dans la mémoire
+            new_alphas[i] = alphas[i] + gamma_k(t) * consensus - alpha_k(t) * grads[i]
+            
+        alphas = new_alphas
         _record_history(history, alphas, alpha_star)
 
-    
     history = _finalize_history(history, alphas)
-    history["noise_std"] = float(nu_k)
+    history["noise_std"] = float(scale)
     return history
 
 
