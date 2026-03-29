@@ -749,37 +749,104 @@ def clip_rows(gradients, clip_norm):
     return gradients * scale
 
 
+# def run_dgd_dp(
+#     agents,
+#     W,
+#     alpha_star,
+#     step,
+#     epsilon,
+#     n_iters,
+#     delta=1e-5,
+#     clip_norm=5.0,
+#     x0=None,
+#     seed=0,
+#     random_init=False,
+# ):
+#     """Run the noisy clipped DGD-DP baseline used in Part III."""
+#     rng = np.random.default_rng(seed)
+#     W = np.asarray(W, dtype=float)
+#     alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
+#     sensitivity = 2.0 * clip_norm
+#     noise_std = sensitivity * np.sqrt(2.0 * np.log(1.25 / delta)) / max(float(epsilon), 1e-12)
+#     noise_std /= np.sqrt(max(1, n_iters))
+
+#     history = _init_history()
+#     for _ in range(n_iters):
+#         grads = clip_rows(grad_all(agents, alphas), clip_norm=clip_norm)
+#         noise = rng.normal(0.0, noise_std, size=grads.shape)
+#         alphas = W @ alphas - step * (grads + noise)
+#         _record_history(history, alphas, alpha_star)
+
+#     history = _finalize_history(history, alphas)
+#     history["noise_std"] = float(noise_std)
+#     return history
+
 def run_dgd_dp(
     agents,
     W,
     alpha_star,
-    step,
+    step, # Ce paramètre devient le 'step_initial' pour la décroissance
     epsilon,
     n_iters,
-    delta=1e-5,
-    clip_norm=5.0,
-    x0=None,
+    delta,
+    clip_norm=1.0, # Sensibilité C pour le clipping L1
+    #x0=None,
     seed=0,
-    random_init=False,
+    #random_init=False,
 ):
-    """Run the noisy clipped DGD-DP baseline used in Part III."""
+    """
+    le Théorème 2 de l'article [arXiv:2202.01113].
+    bruit de Laplace et budget cumulé.
+    """
     rng = np.random.default_rng(seed)
     W = np.asarray(W, dtype=float)
-    alphas = _init_alphas(len(agents), alpha_star.size, x0=x0, seed=seed, random_init=random_init)
-    sensitivity = 2.0 * clip_norm
-    noise_std = sensitivity * np.sqrt(2.0 * np.log(1.25 / delta)) / max(float(epsilon), 1e-12)
-    noise_std /= np.sqrt(max(1, n_iters))
+    n_agents = len(agents)
+    m = alpha_star.size
+    
+    # initialisation
+    alphas = _init_alphas(n_agents, m, x0=None, seed=seed, random_init=False)
+    
+    # --- Paramètres du Théorème 2 ---
+    # C est la borne du gradient. Avec clip_rows (L1), C = 2 * clip_norm
+    C_sens = 2.0 * clip_norm
+    
+    # Échelle du bruit de Laplace (nu) pour un budget epsilon total sur n_iters
+    # nu_k = (C * T) / epsilon 
+    nu_k = (C_sens * n_iters) / max(float(epsilon), 1e-12)
 
-    history = _init_history()
-    for _ in range(n_iters):
+    # Initialisation de l'historique via la fonction du binôme
+    history = _init_history() 
+
+    for k in range(n_iters):
+        # 1. Pas décroissants (Condition nécessaire du Théorème 2)
+        # On utilise le 'step' passé en argument comme base
+        eta_k = 0.002 / (1 + 0.001*k)
+        gamma_k = 1 / (1 + 0.001*(k**0.9))
+        
+        # 2. Calcul des gradients 
+        #  On s'assure que clip_rows utilise la norme L1 pour être raccord avec C
         grads = clip_rows(grad_all(agents, alphas), clip_norm=clip_norm)
-        noise = rng.normal(0.0, noise_std, size=grads.shape)
-        alphas = W @ alphas - step * (grads + noise)
+        
+        # 3. Génération du bruit de Laplace 
+        noise = rng.laplace(0.0, nu_k, size=grads.shape)
+        
+        # 4. Mise à jour DGD-DP (Mélange + Gradient bruité)
+        # x^{k+1} = x^k + gamma_k * (W - I)(x^k + noise) - eta_k * grad
+        noisy_alphas = alphas + noise
+        consensus_term = (W @ noisy_alphas) - alphas
+        
+        alphas = alphas + gamma_k * consensus_term - eta_k * grads
+        
+        
         _record_history(history, alphas, alpha_star)
 
+    
     history = _finalize_history(history, alphas)
-    history["noise_std"] = float(noise_std)
+    history["noise_std"] = float(nu_k)
     return history
+
+
+
 
 
 # ---------------------------------------------------------------------------
