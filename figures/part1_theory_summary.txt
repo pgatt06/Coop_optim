@@ -1,0 +1,52 @@
+Part I checklist
+================
+
+1. Baseline distributed methods use the course assumptions: connected undirected graph and doubly-stochastic mixing.
+   DGD step uses min(0.9*(1-beta)/L, 0.9/L) with beta=0.8727 and L_max=131.8161.
+   GT step uses 0.2/L_max = 1.517e-03.
+   Dual decomposition uses tau = 1/(2*L_dual) = 2.764e-02.
+   ADMM uses rho = sqrt(mu_min*L_max) = 5.135e+00.
+
+2. Directed communication breaks the DGD proof because the average iterate is no longer preserved when the matrix is not doubly stochastic.
+   Packet losses create a time-varying graph that may disconnect the network and violate the fixed-mixing assumption.
+   Asynchrony violates the synchronous update model used in the standard contraction argument.
+
+3. Push-sum restores the missing Perron normalization on directed graphs by tracking weights w_i^t and using z_i^t = x_i^t / w_i^t.
+
+4. Large-n scaling keeps m = ceil(sqrt(n)).
+   The scaling suite also logs consensus gaps and aggregate gradient norms, so it still gives convergence indicators even if a reference solution becomes unavailable.
+   Largest feasible n found under the current compute budget: 819200.
+
+Generated figures
+-----------------
+- part1_dataset.pdf
+- part1_gap_line.pdf
+- part1_reconstruction_compare.pdf
+- part1_dgd_graph_compare.pdf
+- part1_gt_graph_compare.pdf
+- part1_dual_graph_compare.pdf
+- part1_admm_graph_compare.pdf
+- part1_break_convergence.pdf
+- part1_push_sum_recovery.pdf
+- part1_scaling_final_gap.pdf
+- part1_scaling_iterations.pdf
+- part1_scaling_surrogates.pdf
+- part1_scaling_functions.pdf
+- part1_scaling_best_tuned.pdf
+
+Feasible scaling records
+------------------------
+n=100, m=10, agents=5, dgd_final=1.108e+00, gt_final=1.477e+00
+n=200, m=15, agents=5, dgd_final=5.604e-01, gt_final=9.835e-01
+n=400, m=20, agents=5, dgd_final=8.107e-01, gt_final=1.184e+00
+n=800, m=29, agents=5, dgd_final=6.296e-01, gt_final=9.330e-01
+n=1600, m=40, agents=5, dgd_final=9.805e-01, gt_final=1.100e+00
+n=3200, m=57, agents=5, dgd_final=2.485e+00, gt_final=2.525e+00
+n=6400, m=80, agents=5, dgd_final=3.640e+00, gt_final=3.668e+00
+n=12800, m=114, agents=5, dgd_final=3.305e+00, gt_final=3.325e+00
+n=25600, m=160, agents=5, dgd_final=2.820e+00, gt_final=2.836e+00
+n=51200, m=227, agents=5, dgd_final=2.538e+00, gt_final=2.550e+00
+n=102400, m=320, agents=6, dgd_final=2.622e+00, gt_final=2.629e+00
+n=204800, m=453, agents=11, dgd_final=2.815e+00, gt_final=2.818e+00
+n=409600, m=640, agents=21, dgd_final=3.971e+00, gt_final=3.973e+00
+n=819200, m=906, agents=41, dgd_final=6.404e+00, gt_final=6.405e+00
