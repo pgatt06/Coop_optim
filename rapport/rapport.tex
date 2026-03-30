@@ -29,7 +29,7 @@
 
 \title{Cooperative Kernel Regression\\
 \large Distributed Optimization, Federated Learning, and Differential Privacy}
-\author{Agathe PASCAL & Nastassia BONETTI}
+\author{Agathe PASCAL \and Nastassia BONETTI}
 \date{\today}
 
 \begin{document}
@@ -157,7 +157,7 @@ The line graph is representative: the worst final DGD gap is \(7.93\times 10^{-2
 \includegraphics[width=\linewidth]{part1_admm_graph_compare.pdf}
 \end{minipage}
 \caption{Influence of the graph topology on the averaged iterate for Dual decomposition (left) and ADMM (right).}
-\label{fig:graph_compare}
+\label{fig:graph_compare_dual_admm}
 \end{figure}
 
 Topology affects the methods differently. For DGD, better mixing mostly improves the transient phase and allows a larger admissible step; because \(\eta_{\mathrm{DGD}}\propto (1-\beta)/L_{\max}\), the final bias is therefore not strictly monotone in \(\beta\). For GT, the curves align much faster and all end at machine precision, confirming that the tracking term removes the steady-state bias observed in DGD. Dual decomposition and ADMM also reach the exact solution here because the consensus problem is quadratic, strongly convex, and solved through closed-form local updates.
@@ -168,39 +168,41 @@ We can also take a look at the function reconstruction for each algorithm.
 \begin{figure}[H]
 \centering
 \includegraphics[width=.92\linewidth]{part1_reconstruction_compare.pdf}
-\caption{Visualisation of the functions for each algorithms.}
-\label{fig:line}
+\caption{Reconstructed functions for the centralized solution and the four distributed methods.}
+\label{fig:reconstruction}
 \end{figure}
-We can see that for \textbf{DGD}, the curve is slightly offset from the others. This may be due to its bias, since a constant step size was used here. There is still an error. If we look at \textbf{GT}, \textbf{ADMM}, and \textbf{DC}, the three curves are virtually indistinguishable.
+We can see that for \textbf{DGD}, the curve is slightly offset from the others. This is consistent with its constant-step bias. By contrast, \textbf{GT}, \textbf{ADMM}, and \textbf{dual decomposition} are visually indistinguishable from the centralized reconstruction.
 
 \bigskip
-We can try changing several parameters on the communication graphs to see how they affect the algorithms and their convergence: Directed, Packet loss, Asynchronous. 
+We can also perturb the communication model and study how this affects convergence: directed communication, packet losses, and asynchronicity.
 For now, if we make these changes, we obtain the following results for the DGD:
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.8\textwidth]{part1_break_convergence.pdf}
-    \caption{Convergence broken}
-    \label{fig:visualisation}
+    \caption{Breaking convergence assumptions for DGD: directed communication, packet losses, and asynchronous activations all degrade the nominal convergence behavior.}
+    \label{fig:break_convergence}
 \end{figure}
 
-Because of these modifcations, we can use the Push-sum algorithm to solve the convergence problem. We have tried to implement it on DGD. Here are the results. This method helps DGD to have a lower error and converge faster.  
+Because of these modifications, we can use the push-sum protocol to recover convergence on directed graphs. We implemented it on top of DGD; the resulting error is lower and the method converges much more reliably than directed DGD alone.
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.8\textwidth]{part1_push_sum_recovery.pdf}
-    \caption{Convergence broken}
-    \label{fig:visualisation}
+    \caption{Directed communication: push-sum recovery compared with directed DGD.}
+    \label{fig:push_sum_recovery}
 \end{figure}
 
 
-Finally, we can study the case of a larger \textbf{n}.In order to maintain a valid Nyström approximation, we increase the model dimension $m$ in proportion to $\sqrt{n}$.
+Finally, we study the large-\(n\) regime. In order to maintain a valid Nyström approximation, we increase the model dimension \(m\) according to \(m=\lceil\sqrt{n}\rceil\).
 
- We have implemented a dynamic search procedure to determine the system's maximum capacity. The algorithm iteratively increases $n$ and measures two key metrics:
+We implemented a dynamic search procedure to determine the system's maximum feasible scale. The algorithm iteratively increases \(n\), adapts the number of agents when needed, and measures two key metrics:
 \begin{itemize}
     \item \textbf{Final accuracy}: The optimality gap reached after a fixed number of iterations.
     \item \textbf{Convergence rate}: The number of iterations required to fall below a critical threshold.
 \end{itemize}
 
-Examining the generated figures (speed vs. $n$) allows us to draw several conclusions:
+At the largest sizes, recomputing every Part I plot against the exact centralized optimum is no longer practical. In that regime, as allowed by the project statement, we rely on surrogate metrics such as the consensus gap and the aggregate gradient norm, and we retune DGD and GT directly on the largest feasible instance.
+
+Examining the generated figures (speed versus \(n\)) allows us to draw several conclusions:
 \begin{enumerate}
     \item \textbf{Computational Complexity}: Although the problem is distributed among $a$ agents, an increase in $n$ (and thus in $m$) increases the cost of each local operation.
     \item \textbf{Consensus cost}: As $n$ increases, the structure of the problem becomes more complex, and the number of iterations required to reach consensus increases. 
@@ -216,8 +218,8 @@ Examining the generated figures (speed vs. $n$) allows us to draw several conclu
 \centering
 \includegraphics[width=\linewidth]{part1_scaling_iterations.pdf}
 \end{minipage}
-\caption{Speed and optimality ga}
-\label{fig:graph_compare}
+\caption{Large-\(n\) scaling: final mean optimality gap (left) and iterations needed to reach the target threshold (right).}
+\label{fig:scaling_main}
 \end{figure}
 
 \begin{figure}[H]
@@ -231,16 +233,16 @@ Examining the generated figures (speed vs. $n$) allows us to draw several conclu
 \centering
 \includegraphics[width=\linewidth]{part1_scaling_functions.pdf}
 \end{minipage}
-\caption{Functions visualisation}
-\label{fig:graph_compare}
+\caption{Large-\(n\) scaling: surrogate convergence metrics (left) and reconstructed functions for selected values of \(n\) (right).}
+\label{fig:scaling_surrogates}
 \end{figure}
 
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.5\textwidth]{part1_scaling_best_tuned.pdf}
-    \caption{The maximum found is \textbf{8192}}
-    \label{fig:visualisation}
+    \caption{Retuned DGD and GT at the largest feasible size found under the current compute budget, \(n=819200\).}
+    \label{fig:scaling_best}
 \end{figure}
 \section{Federated learning}
 
@@ -288,9 +290,9 @@ The results display the usual trade-off. For \(E=50\), descent per communication
 
 The optional comparison with SCAFFOLD, run with \(C=3\) and \(E=5\), gives a final error \(2.03\times 10^{-2}\) for FedAvg versus \(2.13\times 10^{-14}\) for SCAFFOLD. This is consistent with the theory: the control variates compensate for client drift and become especially useful as soon as not all clients participate at every round.
 
-\section{Differential privacy }
+\section{Differential privacy}
 
-To solve the regression problem in a distributed manner while ensuring local data privacy, we implement the DGD-DP algorithm. Following the framework of \textbf{Theorem 2} from \cite{arXiv:2202.01113}, the private update rule is defined as follows:
+To solve the regression problem in a distributed manner while ensuring local data privacy, we implement the DGD-DP algorithm. Following the framework of \textbf{Theorem 2} from arXiv:2202.01113, the private update rule is defined as follows:
 \[
 \alpha^{k+1} = \alpha^k + \gamma_k \bigl( W(\alpha^k + \zeta^k) - \alpha^k \bigr) - \eta_k g^k
 \]
@@ -314,7 +316,7 @@ The persistent injection of noise necessitates the use of decaying step-size seq
 \end{itemize}
 \begin{figure}[H]
 \centering
-\includegraphics[width=.8\linewidth]{part3_dgd_dp_epsilons (1).pdf}
+\includegraphics[width=.8\linewidth]{part3_dgd_dp_epsilons.pdf}
 \caption{Agent-wise gaps for non-private DGD and private DGD with \(\epsilon\in\{0.1,1,10\}\).}
 \label{fig:dp}
 \end{figure}
@@ -333,7 +335,7 @@ The experiments support the following conclusions:
 \item the Nyström kernel-ridge formulation is used consistently across the three parts, with the centralized solution as the reference point;
 \item in distributed optimization, DGD keeps a constant-step bias, whereas GT, dual decomposition, and ADMM converge exactly in this quadratic setting;
 \item in federated learning, increasing the number of local epochs speeds up progress per round but also increases client drift, and SCAFFOLD corrects that drift effectively;
-\item in differential privacy, DGD-DP remains stable but converges to a neighborhood, as expected with Gaussian noise and a constant step.
+\item in differential privacy, DGD-DP remains stable but converges only to a neighborhood of the optimum, as expected with Laplace communication noise and decaying steps.
 \end{itemize}
 
 The numerical behavior is therefore coherent with the course notation and with the expected mechanisms of the different algorithms.
