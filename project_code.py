@@ -8,6 +8,109 @@ from pathlib import Path
 
 import numpy as np
 
+
+"""
+Quick overview of the top-level functions in this module.
+
+Utilities and loading:
+- ensure_dir(path): create a directory when needed.
+- as_1d(x): convert an input to a 1D float vector.
+- load_first_database(path): load the first pickle dataset.
+- load_second_database(path): load the second dataset and flatten each local split.
+- split_indices_equally(n, n_agents): split n indices into equal contiguous blocks.
+
+Kernel model and quadratic problem:
+- rbf_kernel(x_data, x_landmarks): evaluate the Gaussian kernel between data and landmarks.
+- cov_matrix(x_landmarks): build the landmark Gram matrix.
+- cross_cov_matrix(x_data, x_landmarks): build the data-to-landmark cross-covariance matrix.
+- predict(alpha, x_query, x_landmarks): reconstruct the function on query points.
+- build_nystrom_problem(...): build the Nyström approximation problem.
+- solve_centralized(...): solve the centralized problem in closed form.
+- objective(...): evaluate the centralized objective.
+- smoothness_and_strong_convexity(...): estimate the objective smoothness and strong convexity.
+- quadratic_form_for_agent(...): build one agent's local quadratic model.
+- make_agent_data(...): split data across agents and prepare their local models.
+- local_gradient(alpha, agent): compute one agent's local gradient.
+- grad_all(agents, alphas): stack the gradients of all agents.
+- optimality_gap(alphas, alpha_star): measure each agent's distance to the optimum.
+- aggregate_quadratic_model(agents): sum the local models into one global model.
+- centralized_solution_from_agents(agents): recover the centralized optimum from the agent models.
+- aggregate_gradient(alpha, agents): compute the global gradient from local models.
+- aggregate_gradient_norm(alpha, agents): compute a norm of the global gradient.
+- make_streaming_agent_data(...): build local models in batches for large n.
+
+Graphs and communication matrices:
+- adjacency_from_weights(W): convert a weight matrix to a binary adjacency matrix.
+- is_connected(adj): check whether an undirected graph is connected.
+- make_cycle_adjacency(n): build a cycle graph.
+- make_line_adjacency(n): build a line graph.
+- make_complete_adjacency(n): build a complete graph.
+- make_small_world_adjacency(...): build a connected small-world graph by rewiring.
+- metropolis_weights(adj): compute Metropolis weights for an undirected graph.
+- make_directed_cycle_weights(...): build a row-stochastic directed cycle.
+- build_push_sum_column_matrix(graph): build the column-stochastic push-sum matrix.
+- spectral_beta(W): compute the spectral consensus factor.
+- undirected_edges(adj): enumerate the edges of an undirected graph.
+- incidence_matrix(adj): build the graph incidence matrix.
+- get_graph(name, n, seed=0): return a standard graph and its default weights.
+
+Distributed optimization:
+- _init_alphas(...): initialize the agent variables.
+- _init_history(): create the metric tracking structure.
+- _record_history(...): append one iteration of metrics to the history.
+- _finalize_history(...): convert the final history to arrays and add summaries.
+- _as_adjacency(graph): convert an input to an adjacency matrix.
+- _as_incidence(graph): convert an input to an incidence matrix.
+- _block_diag(blocks): assemble a block-diagonal matrix.
+- dual_lipschitz_constant(...): compute the constant used by dual decomposition.
+- run_dgd(...): run decentralized gradient descent.
+- run_gradient_tracking(...): run gradient tracking.
+- random_loss_mixing(adj, p_loss, rng): sample a mixing matrix with random link losses.
+- run_dgd_packet_loss(...): run DGD with random packet losses.
+- run_async_dgd(...): run a partially asynchronous DGD variant.
+- run_push_sum_dgd(...): run push-sum DGD on a directed graph.
+- run_dual_decomposition(...): run dual decomposition.
+- run_consensus_admm(...): run edge-based consensus ADMM.
+- clip_rows(gradients, clip_norm): clip each gradient row by its Euclidean norm.
+- run_dgd_dp(...): run the private DGD variant with noisy communication.
+
+Federated learning:
+- build_federated_problem(...): build the quadratic federated problem.
+- _batch_gradient(...): compute a client-side mini-batch gradient.
+- run_fedavg(...): run the FedAvg algorithm.
+- run_scaffold(...): run the SCAFFOLD baseline.
+
+Visualization:
+- save_history_plot(...): save a log-log curve.
+- save_semilogy_plot(...): save a semi-log curve.
+- save_agent_gap_grid_plot(...): save a grid of per-agent gaps.
+- save_dataset_plot(...): plot the dataset and the Nyström landmarks.
+- save_xy_plot(...): plot a generic x-y curve.
+- save_reconstruction_plot(...): plot reconstructions from multiple methods.
+
+Part I helpers:
+- first_index_below(curve, threshold): find the first index below a threshold.
+- choose_n_agents(...): choose a practical number of agents for a given n.
+- compute_model_for_n(...): build the large-n model for a chosen n.
+- evaluate_n(...): test whether a given n is numerically feasible.
+- find_largest_n_possible(...): search for the largest feasible n.
+- tune_best_histories(...): retune DGD and GT and keep the best histories.
+- select_scaling_plot_ns(...): subsample the n values to display.
+- part1_steps(...): compute theory-motivated Part I step sizes and parameters.
+- write_part1_summary(...): write the Part I text summary.
+- run_line_baselines(...): run the baseline methods on the line graph.
+- run_graph_sweep(...): compare methods across graph families.
+- run_break_and_push_sum(...): run convergence-breaking scenarios and the push-sum fix.
+- run_scaling_suite(...): run the large-scale study.
+
+Experiment runners and CLI:
+- run_part1(): run all of Part I.
+- run_part2(): run all of Part II.
+- run_part3(): run all of Part III.
+- run_all_parts(): run all three parts.
+- main(argv=None): parse CLI arguments and dispatch to the selected part.
+"""
+
 os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "mplconfig"))
 os.environ.setdefault("XDG_CACHE_HOME", tempfile.gettempdir())
 
@@ -780,23 +883,23 @@ def clip_rows(gradients, clip_norm):
 #     history = _finalize_history(history, alphas)
 #     history["noise_std"] = float(noise_std)
 #     return history
-    # Pas de gradient (réduit pour éviter divergence)
+# Reduced-gradient variant to limit divergence in the noisy setting.
 def run_dgd_dp(
     agents,
     W,
     alpha_star,
-    step, # Ce paramètre devient le 'step_initial' pour la décroissance
+    step,  # Interpreted here as the initial stepsize for the decaying schedule.
     epsilon,
     n_iters,
     delta=1e-5,
-    clip_norm=0.1, # Sensibilité C pour le clipping L1
+    clip_norm=0.1,  # Kept for interface compatibility with the Part III experiments.
     #x0=None,
     seed=0,
     #random_init=False,
 ):
     """
-    le Théorème 2 de l'article [arXiv:2202.01113].
-    bruit de Laplace et budget cumulé.
+    Run a Laplace-noisy communication variant inspired by Theorem 2 of
+    [arXiv:2202.01113], using a cumulative privacy budget.
     """
     rng = np.random.default_rng(seed)
     W = np.asarray(W, dtype=float)
@@ -811,29 +914,24 @@ def run_dgd_dp(
     scale = sensitivity / max(float(epsilon), 1e-12)
     
     
-    # initialisation
+    # Initialize the local states.
     alphas = _init_alphas(n_agents, m, x0=None, seed=seed, random_init=False)
     history = _init_history()
     
     for t in range(n_iters):
-        # 2. Génération du bruit de Laplace pour l'échange (Communication)
-        # On crée une version bruitée 'chi' uniquement pour l'envoi aux voisins
+        # Draw Laplace noise for communication and only share the noisy states.
         zeta = rng.laplace(0.0, scale, size=alphas.shape)
         chi = alphas + zeta
         
-        # Calcul des gradients de tous les agents sur leur état PROPRE (alphas)
-        # (On utilise la fonction grad_all du binôme pour rester cohérent)
+        # Gradients are evaluated on each agent's private local state.
         grads = grad_all(agents, alphas)
         
         new_alphas = np.zeros_like(alphas)
         for i in range(n_agents):
-            # 3. Calcul du terme de consensus bruité
-            # On compare l'état bruité des voisins (chi) avec l'état propre local (alphas[i])
-            # W[i, :] @ chi fait la moyenne pondérée des chi_j
+            # Build the noisy consensus term from neighbors' transmitted states.
             consensus = W[i, :] @ (chi - alphas[i, None])
             
-            # 4. Mise à jour de l'état local (propre)
-            # On repart de alphas[i] pour éviter d'injecter zeta_i dans la mémoire
+            # Update the private local state without storing the communication noise.
             new_alphas[i] = alphas[i] + gamma_k(t) * consensus - alpha_k(t) * grads[i]
             
         alphas = new_alphas
