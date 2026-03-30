@@ -13,7 +13,7 @@
 
 \graphicspath{{../figures/}}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{3pt}
+\setlength{\parskip}{2pt}
 \setlength{\emergencystretch}{2em}
 \setlist[itemize]{noitemsep, topsep=2pt, leftmargin=*}
 
@@ -183,6 +183,8 @@ For now, if we make these changes, we obtain the following results for the DGD:
     \label{fig:break_convergence}
 \end{figure}
 
+These perturbations break the standard DGD assumptions: directed communication destroys double stochasticity, packet losses create a time-varying possibly disconnected graph, and asynchrony violates the synchronous update model. The deterioration observed in Figure~\ref{fig:break_convergence} is therefore consistent with the course theory.
+
 Because of these modifications, we can use the push-sum protocol to recover convergence on directed graphs. We implemented it on top of DGD; the resulting error is lower and the method converges much more reliably than directed DGD alone.
 \begin{figure}[H]
     \centering
@@ -200,7 +202,7 @@ We implemented a dynamic search procedure to determine the system's maximum feas
     \item \textbf{Convergence rate}: The number of iterations required to fall below a critical threshold.
 \end{itemize}
 
-At the largest sizes, recomputing every Part I plot against the exact centralized optimum is no longer practical. In that regime, as allowed by the project statement, we rely on surrogate metrics such as the consensus gap and the aggregate gradient norm, and we retune DGD and GT directly on the largest feasible instance.
+At the largest sizes, recomputing every Part I experiment against the exact centralized optimum is no longer practical. As allowed by the project statement, we then rely on surrogate metrics such as the consensus gap and the aggregate gradient norm, and we restrict the scalable sweep to the two first-order methods DGD and GT. Dual decomposition and ADMM are kept in the \(n=100\) reference study because their algebraic cost becomes prohibitive at the very largest scales.
 
 Examining the generated figures (speed versus \(n\)) allows us to draw several conclusions:
 \begin{enumerate}
@@ -298,12 +300,14 @@ To solve the regression problem in a distributed manner while ensuring local dat
 \]
 where $g_i^k$ is the local gradient and $\zeta_i^k$ represents the additive Laplace noise injected during the communication step.
 
+To match the spirit of Theorem 2, part 3, we keep its main ingredients: Laplace perturbations, diminishing sequences \(\gamma_k\) and \(\eta_k\), and the privacy levels \(\epsilon\in\{0.1,1,10\}\). The theorem also requires a bounded sensitivity constant; in our implementation, this is instantiated by the proxy \(C=0.01\). This section should therefore be read as a theorem-guided study of the privacy/accuracy trade-off under the class assumptions.
+
 \paragraph{Noise Mechanism and Sensitivity}
 To satisfy $\epsilon$-differential privacy requirements, the noise is drawn from a Laplace distribution $\zeta_i^k \sim \text{Lap}(0, \nu)$, where the scale parameter $\nu$ is calibrated based on the local sensitivity $C$ and the privacy budget $\epsilon$:
 \[
 \nu = \frac{C}{\epsilon}
 \]
-In this implementation, rather than using explicit clipping, we assume the local gradient sensitivity is naturally bounded by $C = 0.01$. This choice of $\nu$ ensures that the privacy budget is respected at each exchange, protecting the local model parameters from being reconstructed by neighboring agents.
+In this implementation, we do not re-derive a data-dependent sensitivity bound; instead, we assume that the communicated quantity has bounded sensitivity with proxy $C = 0.01$. Under this assumption, the calibration \(\nu=C/\epsilon\) is consistent with the Laplace mechanism used in the theorem-guided construction.
 
 \paragraph{Convergence Conditions}
 The persistent injection of noise necessitates the use of decaying step-size sequences to ensure stability and convergence toward the optimal solution $\alpha^*$. We employ the following polynomial decay schedules:
